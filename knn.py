@@ -44,48 +44,63 @@ __global__ void compute_distances(float *x_train, float *x_test, float *dist_out
 mod = SourceModule(kernel_code)
 compute_distances = mod.get_function("compute_distances")
 
-def predict_one(test_point, k = 11):
-    n_train = X_train.shape[0]     # Number of training samples
-    x_train_flat = X_train.flatten() #flatten so we can use the kernel code I think
-    
-    
-    # Allocate GPU memory for:
-    # - the flattened training set
-    # - the test point
-    # - the output distance array (one float per training point)
+def predict_all(k=11):
+    n_train = X_train.shape[0]
+    n_test = X_test.shape[0]
+    D = X_train.shape[1]
+
+    # Flatten
+    x_train_flat = X_train.flatten()
+    x_test_flat = X_test.flatten()
+
+    # Allocate device memory
     x_train_gpu = cuda.mem_alloc(x_train_flat.nbytes)
-    x_test_gpu = cuda.mem_alloc(test_point.nbytes)
-    dist_out_gpu = cuda.mem_alloc(n_train * np.float32().nbytes)
-     
-     
-    # Transfer data from CPU (host) to GPU (device) 
-    cuda.memcpy_htod(x_train_gpu, x_train_flat) # these are memcpys from cpu to gpu I think
-    cuda.memcpy_htod(x_test_gpu, test_point)
+    x_test_gpu = cuda.mem_alloc(x_test_flat.nbytes)
+    dist_out_gpu = cuda.mem_alloc(n_test * n_train * np.float32().nbytes)
 
-    # Configure thread layout: 1D grid of blocks, each with 256 threads
-    threads = 256
-    
-    #this that ceiling division shit
-    blocks = (n_train + threads - 1) // threads
-    
-    # Launch the CUDA kernel to compute distances
-    compute_distances(
-        x_train_gpu, x_test_gpu, dist_out_gpu, np.int32(n_train),
-        block=(threads, 1, 1), grid=(blocks, 1)
+    # Copy to device
+    cuda.memcpy_htod(x_train_gpu, x_train_flat)
+    cuda.memcpy_htod(x_test_gpu, x_test_flat)
+
+    # CUDA thread config
+    threads_per_block = (16, 16)
+    blocks_per_grid = (
+        (n_train + threads_per_block[0] - 1) // threads_per_block[0],
+        (n_test + threads_per_block[1] - 1) // threads_per_block[1]
     )
-     # Allocate CPU-side array to hold distances, and copy result back
-    dist_out = np.empty(n_train, dtype=np.float32)
-    cuda.memcpy_dtoh(dist_out, dist_out_gpu)
 
-    # Sort distances and get indices of the k nearest neighbors
-    top_k_idx = np.argsort(dist_out)[:k]
+    # Kernel launch
+    compute_distances(
+        x_train_gpu,
+        x_test_gpu,
+        dist_out_gpu,
+        np.int32(n_train),
+        np.int32(n_test),
+        np.int32(D),
+        block=threads_per_block,
+        grid=blocks_per_grid
+    )
 
-    # Get the corresponding labels and vote for the most common one
-    top_k_labels = y_train[top_k_idx]
-    return Counter(top_k_labels).most_common(1)[0][0]
+    # Copy distances back
+    dist_out_host = np.empty((n_test * n_train), dtype=np.float32)
+    cuda.memcpy_dtoh(dist_out_host, dist_out_gpu)
+
+    # Reshape to matrix [n_test, n_train]
+    dist_matrix = dist_out_host.reshape((n_test, n_train))
+
+    # KNN voting
+    y_pred = []
+    for i in range(n_test):
+        top_k_idx = np.argsort(dist_matrix[i])[:k]
+        top_k_labels = y_train[top_k_idx]
+        vote = Counter(top_k_labels).most_common(1)[0][0]
+        y_pred.append(vote)
+
+    return np.array(y_pred)
+
 
 # Predict
-y_pred = np.array([predict_one(x) for x in X_test])
+y_pred = np.array(predict_all(k = 11))
 
 # Results
 print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
