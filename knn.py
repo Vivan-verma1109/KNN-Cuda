@@ -1,10 +1,10 @@
-from numba import cuda
+from numba import cuda # type: ignore
 cuda.select_device(0)
 cuda.detect()
 
-import pycuda.autoinit
-import pycuda.driver as cuda
-from pycuda.compiler import SourceModule
+import pycuda.autoinit # type: ignore
+import pycuda.driver as cuda # type: ignore
+from pycuda.compiler import SourceModule # type: ignore
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -97,6 +97,7 @@ def predict_all(k=11):
         y_pred.append(vote)
 
     return np.array(y_pred)
+
 
 
 # Predict

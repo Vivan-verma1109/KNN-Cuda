@@ -1,4 +1,4 @@
-#include <cuda_runtime.h>
+#include <cuda_runtime.h> 
 
 __global__ void compute_distances(float *x_train, float *x_test, float *dist_out, int n_train, int D){
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
