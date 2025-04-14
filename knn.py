@@ -28,16 +28,20 @@ X_train = scaler.fit_transform(X_train).astype(np.float32)
 X_test = scaler.transform(X_test).astype(np.float32)
 
 kernel_code = '''
-__global__ void compute_distances(float *x_train, float *x_test, float *dist_out, int n_train){
+__global__ void compute_distances(float *x_train, float *x_test, float *dist_out, int n_train, int D){
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    int test_idx  = blockIdx.y * blockDim.y + threadIdx.y;
+    int train_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    
     if (idx >= n_train) return;
     
     float dist = 0;
-    for(int i = 0; i < 8; i++){
-        float diff = x_train[idx * 8 + i] - x_test[i];
-        dist += diff * diff;
+    for(int d = 0; d < D; d++){
+        float diff = x_train[train_idx * D + d] - x_test[test_idx * D + d]
+        dist += diff * diff
     }
-    dist_out[idx] = dist;
+    dist_out[test_idx * N + train_idx] = dist;
 }
 '''
 
