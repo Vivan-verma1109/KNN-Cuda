@@ -5,6 +5,7 @@ cuda.detect()
 import pycuda.autoinit # type: ignore
 import pycuda.driver as cuda # type: ignore
 from pycuda.compiler import SourceModule # type: ignore
+import cupy as cp ##type: ignore
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -105,25 +106,25 @@ def predict_all(k=11):
         block=threads_per_block,
         grid=blocks_per_grid
     )
+    #  Wrap the dist_out_gpu as a CuPy array (no need to copy to CPU)
+    dist_matrix_cu = cp.ndarray((n_test,n_train), dtype=cp.float32, memptr=dist_out_gpu)
+    #Get top-k indices per test sample
+    top_k_idx = cp.argsort(dist_matrix_cu, axis=1)[:, :k]
+    #Copy y_train to GPU
+    y_train_gpu = cp.asarray(y_train)
+    #labels of knn w/ shape n_test, k
+    top_k_labels = y_train_gpu[top_k_idx]                            
+    #vote on GPU
+    top_k_labels_cpu = cp.asnumpy(top_k_labels)
+    from scipy.stats import mode
+    
+    y_pred = mode(top_k_labels_cpu, axis = 1)[0].flatten()
+    return y_pred
 
-    # Copy distance results back to CPU
-    dist_out_host = np.empty((n_test * n_train), dtype=np.float32)
-    cuda.memcpy_dtoh(dist_out_host, dist_out_gpu)
-
-    # Reshape into distance matrix (n_test x n_train)
-    dist_matrix = dist_out_host.reshape((n_test, n_train))
-
-    # Predict labels using KNN majority voting
-    y_pred = []
-    for i in range(n_test):
-        top_k_idx = np.argsort(dist_matrix[i])[:k]         # indices of k smallest distances
-        top_k_labels = y_train[top_k_idx]                  # grab corresponding labels
-        vote = Counter(top_k_labels).most_common(1)[0][0]  # majority vote
-        y_pred.append(vote)
-
-    return np.array(y_pred)
-
-
+# dist_matrix_cu = GPU distance matrix
+# top_k_idx = indices of closest k train points (per test sample)
+# y_train_gpu = labels sent to GPU
+# top_k_labels = labels of k-nearest neighbors (for each test sample)
 
 
 # Predict
