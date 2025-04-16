@@ -17,3 +17,14 @@ __global__ void compute_distances(float *x_train, float *x_test, float *dist_out
     // Store computed squared distance in output matrix (row-major order)
     dist_out[test_idx * n_train + train_idx] = dist;
 }
+
+__global__ void majority_vote(int *top_k_labels, int *y_pred, int n_test, int k) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n_test) return;
+
+    int count = 0
+    for(int j = 0; j < k; j++){
+         count += top_k_labels[idx * k + j];
+    }
+    y_pred[idx] = (count >= (k + 1) / 2) ? 1 : 0; //If the number of 1s is greater than or equal to half of k → predict 1, else predict 0
+}

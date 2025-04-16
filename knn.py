@@ -28,6 +28,20 @@ scaler = StandardScaler()
 X_train = scaler.fit_transform(X_train).astype(np.float32)
 X_test = scaler.transform(X_test).astype(np.float32)
 
+majority_code = '''
+__global__ void majority_vote(int *top_k_labels, int *y_pred, int n_test, int k) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n_test) return;
+
+    int count = 0
+    for(int j = 0; j < k; j++){
+         count += top_k_labels[idx * k + j];
+    }
+    y_pred[idx] = (count >= (k + 1) / 2) ? 1 : 0; //If the number of 1s is greater than or equal to half of k → predict 1, else predict 0
+}
+'''
+
+
 kernel_code = '''
 // CUDA kernel to compute squared Euclidean distances between all test and train points
 __global__ void compute_distances(float *x_train, float *x_test, float *dist_out, int n_train, int n_test, int D) {
@@ -51,6 +65,7 @@ __global__ void compute_distances(float *x_train, float *x_test, float *dist_out
 '''
 
 # Compile the CUDA kernel
+kernel_code = kernel_code + majority_code
 mod = SourceModule(kernel_code)
 
 # Retrieve the kernel function by name
@@ -113,12 +128,16 @@ def predict_all(k=11):
     #Copy y_train to GPU
     y_train_gpu = cp.asarray(y_train)
     #labels of knn w/ shape n_test, k
-    top_k_labels = y_train_gpu[top_k_idx]                            
-    #vote on GPU
-    top_k_labels_cpu = cp.asnumpy(top_k_labels)
-    from scipy.stats import mode
-    
-    y_pred = mode(top_k_labels_cpu, axis = 1)[0].flatten()
+    top_k_labels = y_train_gpu[top_k_idx]                  
+    flat_top_k = top_k_labels.flatten().astype(cp.int32)
+    y_pred_gpu = cp.zeros(n_test, dtype=cp.int32)
+    threads_per_block = 256
+    blocks_per_grid = (n_test + threads_per_block - 1) // threads_per_block
+          
+    majority_vote(
+    flat_top_k, y_pred_gpu, np.int32(n_test), np.int32(k), block=(threads_per_block, 1, 1), grid=(blocks_per_grid, 1)
+    )
+    y_pred = cp.asnumpy(y_pred_gpu)
     return y_pred
 
 # dist_matrix_cu = GPU distance matrix
